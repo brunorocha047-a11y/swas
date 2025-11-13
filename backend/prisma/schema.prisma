@@ -1,0 +1,218 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// === MODELOS BASE (Multi-Tenant) ===
+
+model Tenant {
+  id                String   @id @default(uuid())
+  name              String
+  stripeCustomerId  String?  @unique
+  createdAt         DateTime @default(now())
+  
+  // Relacionamentos
+  users             User[]
+  projects          Project[]
+  tenantConfig      TenantConfig?
+}
+
+
+model User {
+  id           String  @id @default(uuid())
+  email        String  @unique
+  clerkUserId  String  @unique  // ID do Clerk
+  
+  // Chave estrangeira para Tenant (Obrigatório para multi-tenant)
+  tenantId     String
+  tenant       Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  createdAt    DateTime @default(now())
+}
+
+
+model Project {
+  id        String   @id @default(uuid())
+  
+  // Chave estrangeira para Tenant (Obrigatório para multi-tenant)
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  name      String
+  startDate DateTime @default(now())
+  createdAt DateTime @default(now())
+  
+  // Relacionamentos com os módulos
+  mapeamento       MagmaMapeamento?
+  pilares          Pilar[]
+  contentBriefs    ContentBrief[]
+  analyticsReports AnalyticsReport[]
+}
+
+
+// === MÓDULO 1: MAPEAMENTO ===
+
+model MagmaMapeamento {
+  id              String   @id @default(uuid())
+  
+  // Relacionamento 1:1 com Project
+  projectId       String   @unique
+  project         Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  
+  // Brand Story Canvas
+  brandArchetype  String?
+  brandBeliefs    String?
+  visualIcon      String?
+  sonicIcon       String?
+  
+  // Audience Intelligence
+  personas        Persona[]  // Tabela própria (abaixo)
+  
+  // Competitive Landscape
+  competitors     String?
+  gapAnalysis     String?
+}
+
+
+model Persona {
+  id                String   @id @default(uuid())
+  
+  // Relacionamento com MagmaMapeamento
+  mapeamentoId      String
+  mapeamento        MagmaMapeamento @relation(fields: [mapeamentoId], references: [id], onDelete: Cascade)
+  
+  name              String
+  jtbd              String   // Job-To-Be-Done
+  awarenessLevel    Int      // 1 a 5
+  primaryMotivator  String?  // Competição, Benefício, Inspiração
+}
+
+
+// === MÓDULO 2 & 5: PILARES (MODELAGEM RELACIONAL CORRIGIDA) ===
+
+model Pilar {
+  id        String   @id @default(uuid())
+  
+  // Relacionamento com Project
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  
+  name      String
+  status    PilarStatus @default(ATIVO)  // Enum crítico para o Módulo 5
+  createdAt DateTime @default(now())
+  
+  // Relacionamento com clusters e conteúdo
+  topicClusters TopicCluster[]
+  contentBriefs ContentBrief[]
+}
+
+
+enum PilarStatus {
+  ATIVO
+  OTIMIZANDO
+  ELIMINADO
+}
+
+
+model TopicCluster {
+  id        String   @id @default(uuid())
+  
+  // Relacionamento com Pilar
+  pilarId   String
+  pilar     Pilar    @relation(fields: [pilarId], references: [id], onDelete: Cascade)
+  
+  name      String
+  createdAt DateTime @default(now())
+}
+
+
+// === MÓDULO 3: CONTENT FACTORY ===
+
+model ContentBrief {
+  id           String   @id @default(uuid())
+  
+  // Relacionamento com Project
+  projectId    String
+  project      Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  
+  // Relacionamento opcional com Pilar
+  pilarId      String?
+  pilar        Pilar?   @relation(fields: [pilarId], references: [id], onDelete: SetNull)
+  
+  title        String
+  awarenessLevel Int
+  primaryPersona String? // nome ou ID da persona
+  toneOfVoice  String?
+  primaryKeyword String?
+  cta          String?
+  createdAt    DateTime @default(now())
+  
+  contentPieces ContentPiece[]
+}
+
+
+model ContentPiece {
+  id            String   @id @default(uuid())
+  
+  // Relacionamento com ContentBrief
+  briefId       String
+  brief         ContentBrief @relation(fields: [briefId], references: [id], onDelete: Cascade)
+  
+  status        ContentStatus @default(BACKLOG)
+  bodyText      String?   // versão final aprovada
+  aiDraftV1     String?   // rascunho da IA
+  format        String?   // "linkedin_post", "instagram_carousel", etc.
+  scheduledFor  DateTime?
+  publishedAt   DateTime?
+  createdAt     DateTime @default(now())
+}
+
+
+enum ContentStatus {
+  BACKLOG
+  BRIEFING
+  IA_GERANDO
+  PILAR_EM_REVISAO
+  PILAR_APROVADO
+  SATELITE_EM_REVISAO
+  APROVADO
+  PUBLICADO
+}
+
+
+// === MÓDULO 4: PERFORMANCE (SOPORTE AO EMBED) ===
+
+model TenantConfig {
+  id           String  @id @default(uuid())
+  
+  // Relacionamento 1:1 com Tenant
+  tenantId     String  @unique
+  tenant       Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  aaEmbedUrl   String?  // URL do dashboard do AgencyAnalytics
+  updatedAt    DateTime @updatedAt
+}
+
+
+// === MÓDULO 4: RELATÓRIOS ===
+
+model AnalyticsReport {
+  id        String   @id @default(uuid())
+  
+  // Relacionamento com Project
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  
+  month     DateTime // ex: 2025-03-01
+  metrics   Json     // armazena { roi: 250, leads: 42, ... }
+  createdAt DateTime @default(now())
+  
+  @@unique([projectId, month])
+}
